@@ -1,0 +1,9 @@
+[Unit]
+Description=Synthetic Market Data Feed
+
+[Service]
+ExecStart=/usr/bin/python3 feed/generator.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

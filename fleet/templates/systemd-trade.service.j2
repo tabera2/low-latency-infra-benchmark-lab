@@ -1,0 +1,9 @@
+[Unit]
+Description=Trading Engine
+
+[Service]
+ExecStart=/usr/bin/python3 bench/harness.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
