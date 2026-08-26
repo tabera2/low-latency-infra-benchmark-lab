@@ -16,6 +16,10 @@ import time
 from feed.generator import generate
 from feed.tick import Tick
 
+import random
+
+from bench.tuning_model import TuningProfile, apply_effect
+
 
 def trading_work(tick: Tick) -> int:
     """Stand-in for the hot path: decode a tick and 'decide'. Cheap and
@@ -25,13 +29,18 @@ def trading_work(tick: Tick) -> int:
     return (mid * 1103515245 + tick.seq) & 0xFFFF
 
 
-def run(rate: int, seconds: float, warmup_s: float = 0.5) -> list[int]:
+def run(rate: int, 
+        seconds: float, warmup_s: 
+        float = 0.5, 
+        profile: TuningProfile | None = None
+        ) -> list[int]:
     """Return a list of tick-to-response latencies in nanoseconds, warmup
     samples excluded. One sample per tick — we store them all and reduce later,
     never averaging on the fly (averaging early destroys the tail)."""
     latencies_ns: list[int] = []
     warmup_ns = int(warmup_s * 1_000_000_000)
     start = time.perf_counter_ns()
+    rng = random.Random(42)
 
     for tick in generate(rate, seconds):
         _ = trading_work(tick)
@@ -39,10 +48,15 @@ def run(rate: int, seconds: float, warmup_s: float = 0.5) -> list[int]:
         # COORDINATED-OMISSION GUARD: measure from the tick's SCHEDULED send
         # time, so if trading_work fell behind, the queueing delay is counted.
         latency = done - tick.sent_ns
+
+        if profile is not None:
+            latency = apply_effect(latency, profile, rng)
+
         if (done - start) >= warmup_ns:      # drop warmup samples
             latencies_ns.append(latency)
 
     return latencies_ns
+
 
 
 def main() -> None:
@@ -50,7 +64,24 @@ def main() -> None:
     ap.add_argument("--rate", type=int, default=50_000)
     ap.add_argument("--seconds", type=float, default=3.0)
     ap.add_argument("--out", default=None, help="write raw samples to this file")
+    ap.add_argument("--tuned", action="store_true")
     args = ap.parse_args()
+
+    profile = None
+
+    if args.tuned:
+        profile = TuningProfile(
+            cpu_pinned=True,
+            irq_steered=True,
+            busy_poll=True,
+            slow_start_off=True,
+        )
+
+    samples = run(
+        args.rate,
+        args.seconds,
+        profile=profile
+    )
 
     samples = run(args.rate, args.seconds)
     print(f"collected {len(samples):,} steady-state samples")
